@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use crate::api::schema::{
-    EmptyParams, Method, Request, WorkspaceCreateParams, WorkspaceMoveBlockParams,
-    WorkspaceRenameParams, WorkspaceReportMetadataParams,
+    Method, WorkspaceCreateParams, WorkspaceMoveGroupParams, WorkspaceRenameParams,
+    WorkspaceReportMetadataParams,
 };
 
 pub(super) fn run_workspace_command(args: &[String]) -> std::io::Result<i32> {
@@ -256,55 +256,10 @@ fn workspace_move(args: &[String]) -> std::io::Result<i32> {
             return Ok(2);
         }
     };
-    let listed = super::send_request(&Request {
-        id: "cli:workspace:move".into(),
-        method: Method::WorkspaceList(EmptyParams::default()),
-    })?;
-    if listed.get("error").is_some() {
-        return super::print_response(&listed);
-    }
-
-    super::runtime::workspace_move_block(WorkspaceMoveBlockParams {
-        workspace_ids: workspace_move_block_ids(
-            &listed,
-            &super::normalize_workspace_id(raw_workspace_id),
-        ),
+    super::runtime::workspace_move_group(WorkspaceMoveGroupParams {
+        workspace_id: super::normalize_workspace_id(raw_workspace_id),
         before_workspace_id,
     })
-}
-
-// Worktree parents move with their linked worktrees so the group stays together.
-fn workspace_move_block_ids(listed: &serde_json::Value, raw_workspace_id: &str) -> Vec<String> {
-    let workspaces = listed["result"]["workspaces"]
-        .as_array()
-        .map(Vec::as_slice)
-        .unwrap_or_default();
-    let number = raw_workspace_id
-        .strip_prefix("w_")
-        .unwrap_or(raw_workspace_id)
-        .parse::<u64>()
-        .ok();
-    let Some(workspace_id) = workspaces
-        .iter()
-        .find(|workspace| workspace["workspace_id"].as_str() == Some(raw_workspace_id))
-        .or_else(|| {
-            workspaces
-                .iter()
-                .find(|workspace| number.is_some() && workspace["number"].as_u64() == number)
-        })
-        .and_then(|workspace| workspace["workspace_id"].as_str())
-    else {
-        return vec![raw_workspace_id.to_owned()];
-    };
-    let children = workspaces
-        .iter()
-        .filter(|workspace| {
-            workspace["worktree"]["parent_workspace_id"].as_str() == Some(workspace_id)
-        })
-        .filter_map(|workspace| workspace["workspace_id"].as_str().map(str::to_owned));
-    std::iter::once(workspace_id.to_owned())
-        .chain(children)
-        .collect()
 }
 
 fn print_workspace_help() {

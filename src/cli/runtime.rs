@@ -2,7 +2,7 @@ use crate::api::schema::{
     EmptyParams, Method, PaneFocusDirectionParams, PaneInputSetParams, PaneMoveParams,
     PaneRenameParams, PaneResizeParams, PaneSplitParams, PaneSwapParams, PaneTarget,
     PaneZoomParams, Request, TabCreateParams, TabListParams, TabRenameParams, TabTarget,
-    WorkspaceCloseParams, WorkspaceCreateParams, WorkspaceMoveBlockParams, WorkspaceRenameParams,
+    WorkspaceCloseParams, WorkspaceCreateParams, WorkspaceMoveGroupParams, WorkspaceRenameParams,
     WorkspaceTarget, WorktreeCreateParams, WorktreeListParams, WorktreeOpenParams,
     WorktreeRemoveParams,
 };
@@ -43,8 +43,8 @@ pub(super) fn workspace_rename(params: WorkspaceRenameParams) -> std::io::Result
     print_method_response("cli:workspace:rename", Method::WorkspaceRename(params))
 }
 
-pub(super) fn workspace_move_block(params: WorkspaceMoveBlockParams) -> std::io::Result<i32> {
-    print_method_response("cli:workspace:move", Method::WorkspaceMoveBlock(params))
+pub(super) fn workspace_move_group(params: WorkspaceMoveGroupParams) -> std::io::Result<i32> {
+    print_method_response("cli:workspace:move", Method::WorkspaceMoveGroup(params))
 }
 
 pub(super) fn workspace_close(params: WorkspaceCloseParams) -> std::io::Result<i32> {
