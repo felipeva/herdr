@@ -573,6 +573,7 @@ mod tests {
             repo_root: "/repo/herdr".into(),
             checkout_path: "/repo/herdr-issue".into(),
             is_linked_worktree: true,
+            parent_workspace_id: None,
         });
         app
     }
@@ -586,6 +587,7 @@ mod tests {
             repo_root: "/repo/herdr".into(),
             checkout_path: "/repo/herdr".into(),
             is_linked_worktree: false,
+            parent_workspace_id: None,
         });
         app.state.workspaces.insert(0, parent);
         app.state.active = Some(1);
@@ -732,10 +734,13 @@ mod tests {
                     .state
                     .terminal_id_for_pane(target_index, target_pane)
                     .unwrap();
-                let closed_indices = if method == "group" {
-                    vec![1, 2, 3]
-                } else {
-                    vec![target_index]
+                // Each parent owns only the worktrees it created: parent 1 owns
+                // the linked worktree, and the duplicate owns nothing.
+                let closed_indices = match (method, target_index) {
+                    ("group", 1) => vec![1, 2],
+                    (_, 3) => vec![3],
+                    // A plain close of a parent that owns worktrees needs a group close.
+                    _ => continue,
                 };
                 let closed_ids = closed_indices
                     .iter()

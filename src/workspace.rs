@@ -36,6 +36,9 @@ pub struct WorktreeSpaceMembership {
     pub repo_root: PathBuf,
     pub checkout_path: PathBuf,
     pub is_linked_worktree: bool,
+    /// Parent workspace of a linked worktree; the repo key is shared by sibling parents.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_workspace_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
