@@ -9,13 +9,10 @@ impl App {
 
     pub(crate) fn close_removed_linked_worktree_workspace(&mut self, ws_idx: usize) {
         let removed_workspace_was_active = self.state.active == Some(ws_idx);
-        let parent_key = self
+        let parent_id = self
             .state
-            .workspaces
-            .get(ws_idx)
-            .and_then(|workspace| workspace.worktree_space())
-            .filter(|space| space.is_linked_worktree)
-            .map(|space| space.key.clone());
+            .worktree_parent_idx(ws_idx)
+            .map(|parent_idx| self.state.workspaces[parent_idx].id.clone());
 
         self.state.selected = ws_idx;
         self.state.close_selected_workspace();
@@ -23,14 +20,15 @@ impl App {
         if !removed_workspace_was_active {
             return;
         }
-        let Some(parent_key) = parent_key else {
+        let Some(parent_id) = parent_id else {
             return;
         };
-        let Some(parent_idx) = self.state.workspaces.iter().position(|workspace| {
-            workspace
-                .worktree_space()
-                .is_some_and(|space| !space.is_linked_worktree && space.key == parent_key)
-        }) else {
+        let Some(parent_idx) = self
+            .state
+            .workspaces
+            .iter()
+            .position(|workspace| workspace.id == parent_id)
+        else {
             return;
         };
         self.state.switch_workspace(parent_idx);

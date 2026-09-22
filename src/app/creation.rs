@@ -399,6 +399,10 @@ impl App {
                     repo_root: space.repo_root.display().to_string(),
                     checkout_path: space.checkout_path.display().to_string(),
                     is_linked_worktree: space.is_linked_worktree,
+                    parent_workspace_id: self
+                        .state
+                        .worktree_parent_idx(index)
+                        .map(|parent_idx| self.public_workspace_id(parent_idx)),
                 }),
         }
     }

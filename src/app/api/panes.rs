@@ -3001,6 +3001,7 @@ mod tests {
             repo_root: "/repo/herdr".into(),
             checkout_path: "/repo/herdr-issue".into(),
             is_linked_worktree: true,
+            parent_workspace_id: None,
         });
         app
     }
