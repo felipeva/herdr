@@ -327,12 +327,13 @@ impl App {
                 "workspace has linked worktree workspaces; use --group (close_group=true in the API) to close the group",
             );
         }
+        let worktree_parents = self.state.worktree_parent_indices();
         let closed_workspaces = close_indices
             .iter()
             .map(|index| {
                 (
                     self.public_workspace_id(*index),
-                    self.workspace_info(*index),
+                    self.workspace_info_with_parent(*index, worktree_parents[*index]),
                 )
             })
             .collect::<Vec<_>>();
@@ -354,10 +355,10 @@ impl App {
 
     fn workspace_list_info(&self) -> Vec<crate::api::schema::WorkspaceInfo> {
         self.state
-            .workspaces
-            .iter()
+            .worktree_parent_indices()
+            .into_iter()
             .enumerate()
-            .map(|(idx, _)| self.workspace_info(idx))
+            .map(|(idx, parent_idx)| self.workspace_info_with_parent(idx, parent_idx))
             .collect()
     }
 }

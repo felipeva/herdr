@@ -377,6 +377,14 @@ impl App {
     }
 
     pub(super) fn workspace_info(&self, index: usize) -> crate::api::schema::WorkspaceInfo {
+        self.workspace_info_with_parent(index, self.state.worktree_parent_idx(index))
+    }
+
+    pub(super) fn workspace_info_with_parent(
+        &self,
+        index: usize,
+        worktree_parent_idx: Option<usize>,
+    ) -> crate::api::schema::WorkspaceInfo {
         let ws = &self.state.workspaces[index];
         let (agg_state, seen) = ws.aggregate_state(&self.state.terminals);
         crate::api::schema::WorkspaceInfo {
@@ -399,9 +407,7 @@ impl App {
                     repo_root: space.repo_root.display().to_string(),
                     checkout_path: space.checkout_path.display().to_string(),
                     is_linked_worktree: space.is_linked_worktree,
-                    parent_workspace_id: self
-                        .state
-                        .worktree_parent_idx(index)
+                    parent_workspace_id: worktree_parent_idx
                         .map(|parent_idx| self.public_workspace_id(parent_idx)),
                 }),
         }
