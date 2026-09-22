@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use crate::api::schema::{
     EventData, EventEnvelope, EventKind, ResponseResult, WorkspaceCloseParams,
-    WorkspaceCreateParams, WorkspaceMoveBlockParams, WorkspaceMoveParams, WorkspaceRenameParams,
-    WorkspaceReportMetadataParams, WorkspaceTarget,
+    WorkspaceCreateParams, WorkspaceMoveBlockParams, WorkspaceMoveGroupParams, WorkspaceMoveParams,
+    WorkspaceRenameParams, WorkspaceReportMetadataParams, WorkspaceTarget,
 };
 use crate::app::App;
 
@@ -236,6 +236,37 @@ impl App {
         }
 
         encode_success(id, ResponseResult::WorkspaceList { workspaces })
+    }
+
+    pub(super) fn handle_workspace_move_group(
+        &mut self,
+        id: String,
+        params: WorkspaceMoveGroupParams,
+    ) -> String {
+        let Some(ws_idx) = self
+            .parse_workspace_id(&params.workspace_id)
+            .filter(|idx| *idx < self.state.workspaces.len())
+        else {
+            return workspace_not_found(id, &params.workspace_id);
+        };
+        let workspace_ids = std::iter::once(ws_idx)
+            .chain(
+                self.state
+                    .worktree_parent_indices()
+                    .into_iter()
+                    .enumerate()
+                    .filter_map(|(idx, parent_idx)| (parent_idx == Some(ws_idx)).then_some(idx)),
+            )
+            .map(|idx| self.public_workspace_id(idx))
+            .collect();
+
+        self.handle_workspace_move_block(
+            id,
+            WorkspaceMoveBlockParams {
+                workspace_ids,
+                before_workspace_id: params.before_workspace_id,
+            },
+        )
     }
 
     pub(super) fn handle_workspace_report_metadata(
@@ -899,6 +930,61 @@ mod tests {
                     && workspaces[2].workspace_id == moved_id
             )
         }));
+    }
+
+    #[test]
+    fn api_workspace_move_group_moves_parent_with_its_linked_worktrees() {
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        app.state.workspaces = ["a", "c", "c-child", "a-child", "tail"]
+            .into_iter()
+            .map(Workspace::test_new)
+            .collect();
+        let a_id = app.public_workspace_id(0);
+        let c_id = app.public_workspace_id(1);
+        for (idx, parent_id) in [(0, None), (1, None), (2, Some(&c_id)), (3, Some(&a_id))] {
+            app.state.workspaces[idx].worktree_space =
+                Some(crate::workspace::WorktreeSpaceMembership {
+                    key: "repo-key".into(),
+                    label: "herdr".into(),
+                    repo_root: "/repo/herdr".into(),
+                    checkout_path: format!("/checkouts/{idx}").into(),
+                    is_linked_worktree: parent_id.is_some(),
+                    parent_workspace_id: parent_id.cloned(),
+                });
+        }
+
+        let response = app.handle_workspace_move_group(
+            "req".into(),
+            WorkspaceMoveGroupParams {
+                workspace_id: "2".into(),
+                before_workspace_id: Some(a_id),
+            },
+        );
+
+        assert!(response.contains("\"result\""), "{response}");
+        assert_eq!(
+            app.state
+                .workspaces
+                .iter()
+                .map(|workspace| workspace.display_name())
+                .collect::<Vec<_>>(),
+            ["c", "c-child", "a", "a-child", "tail"]
+        );
+        let missing = app.handle_workspace_move_group(
+            "req".into(),
+            WorkspaceMoveGroupParams {
+                workspace_id: "missing".into(),
+                before_workspace_id: None,
+            },
+        );
+        assert!(missing.contains("workspace_not_found"), "{missing}");
     }
 
     #[test]

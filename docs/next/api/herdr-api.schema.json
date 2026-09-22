@@ -4525,6 +4525,23 @@
           ],
           "type": "object"
         },
+        "WorkspaceMoveGroupParams": {
+          "properties": {
+            "before_workspace_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "workspace_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "workspace_id"
+          ],
+          "type": "object"
+        },
         "WorkspaceMoveParams": {
           "properties": {
             "insert_index": {
@@ -5123,6 +5140,22 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/WorkspaceMoveBlockParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "workspace.move_group",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/WorkspaceMoveGroupParams"
             }
           },
           "required": [
