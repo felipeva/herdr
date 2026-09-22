@@ -1147,6 +1147,13 @@
             "is_linked_worktree": {
               "type": "boolean"
             },
+            "parent_workspace_id": {
+              "description": "Parent workspace that owns this linked worktree.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "repo_key": {
               "type": "string"
             },
@@ -4614,6 +4621,13 @@
             },
             "is_linked_worktree": {
               "type": "boolean"
+            },
+            "parent_workspace_id": {
+              "description": "Parent workspace that owns this linked worktree.",
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "repo_key": {
               "type": "string"
@@ -10879,6 +10893,13 @@
             },
             "is_linked_worktree": {
               "type": "boolean"
+            },
+            "parent_workspace_id": {
+              "description": "Parent workspace that owns this linked worktree.",
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "repo_key": {
               "type": "string"

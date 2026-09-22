@@ -90,7 +90,11 @@ pub(super) fn snapshot_with_completions(
                 worktree: workspace
                     .worktree
                     .map(|worktree| protocol::ClientShellWorktree {
-                        key: worktree.repo_key,
+                        // Parents sharing a repo must not merge their worktree groups.
+                        key: app
+                            .state
+                            .worktree_group_key(workspace_index)
+                            .unwrap_or(worktree.repo_key),
                         label: worktree.repo_name,
                         is_linked_worktree: worktree.is_linked_worktree,
                     }),
@@ -601,6 +605,50 @@ mod tests {
             )),
             Some(("0.8.3", "### Changed\n- Client shell", true))
         );
+    }
+
+    #[test]
+    fn snapshot_groups_linked_worktree_under_its_recorded_parent() {
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = crate::app::App::new(
+            &crate::config::Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        app.state.workspaces = ["a", "b", "c", "c-child"]
+            .into_iter()
+            .map(crate::workspace::Workspace::test_new)
+            .collect();
+        app.state.ensure_test_terminals();
+        let c_id = app.state.workspaces[2].id.clone();
+        for (idx, workspace) in app.state.workspaces.iter_mut().enumerate() {
+            let linked = idx == 3;
+            workspace.worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+                key: "repo-key".into(),
+                label: "herdr".into(),
+                repo_root: "/repo/herdr".into(),
+                checkout_path: if linked {
+                    "/worktrees/c-child".into()
+                } else {
+                    "/repo/herdr".into()
+                },
+                is_linked_worktree: linked,
+                parent_workspace_id: linked.then(|| c_id.clone()),
+            });
+        }
+
+        let snapshot = snapshot(&app, "boot", 1, None, None);
+        let keys = snapshot
+            .workspaces
+            .iter()
+            .map(|workspace| workspace.worktree.as_ref().unwrap().key.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(keys[3], keys[2]);
+        assert_ne!(keys[3], keys[0]);
+        assert_ne!(keys[0], keys[1]);
     }
 
     #[test]

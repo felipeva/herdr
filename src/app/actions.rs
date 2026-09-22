@@ -878,24 +878,57 @@ impl AppState {
         self.apply_pane_zoom(ws_idx, pane_id, PaneZoomCommand::Toggle);
     }
 
-    pub(crate) fn workspace_close_indices(&self, ws_idx: usize) -> Vec<usize> {
-        self.workspaces
-            .get(ws_idx)
-            .and_then(|ws| ws.worktree_space())
-            .filter(|space| !space.is_linked_worktree)
-            .map(|space| {
+    pub(crate) fn worktree_parent_idx(&self, ws_idx: usize) -> Option<usize> {
+        let space = self
+            .workspaces
+            .get(ws_idx)?
+            .worktree_space()
+            .filter(|space| space.is_linked_worktree)?;
+        let is_repo_parent = |ws: &crate::workspace::Workspace| {
+            ws.worktree_space()
+                .is_some_and(|member| !member.is_linked_worktree && member.key == space.key)
+        };
+        space
+            .parent_workspace_id
+            .as_deref()
+            .and_then(|parent_id| {
                 self.workspaces
                     .iter()
-                    .enumerate()
-                    .filter_map(|(idx, ws)| {
-                        ws.worktree_space()
-                            .is_some_and(|member| member.key == space.key)
-                            .then_some(idx)
-                    })
-                    .collect::<Vec<_>>()
+                    .position(|ws| ws.id == parent_id && is_repo_parent(ws))
             })
-            .filter(|indices| indices.len() >= 2)
-            .unwrap_or_else(|| vec![ws_idx])
+            .or_else(|| self.workspaces.iter().position(is_repo_parent))
+    }
+
+    pub(crate) fn worktree_group_key(&self, ws_idx: usize) -> Option<String> {
+        let ws = self.workspaces.get(ws_idx)?;
+        let space = ws.worktree_space()?;
+        if !space.is_linked_worktree {
+            return Some(ws.id.clone());
+        }
+        Some(
+            self.worktree_parent_idx(ws_idx)
+                .map(|parent_idx| self.workspaces[parent_idx].id.clone())
+                .unwrap_or_else(|| space.key.clone()),
+        )
+    }
+
+    pub(crate) fn workspace_close_indices(&self, ws_idx: usize) -> Vec<usize> {
+        let is_parent = self
+            .workspaces
+            .get(ws_idx)
+            .and_then(|ws| ws.worktree_space())
+            .is_some_and(|space| !space.is_linked_worktree);
+        if !is_parent {
+            return vec![ws_idx];
+        }
+        let indices = (0..self.workspaces.len())
+            .filter(|idx| *idx == ws_idx || self.worktree_parent_idx(*idx) == Some(ws_idx))
+            .collect::<Vec<_>>();
+        if indices.len() >= 2 {
+            indices
+        } else {
+            vec![ws_idx]
+        }
     }
 
     pub(crate) fn workspace_close_would_close_worktree_group(&self, ws_idx: usize) -> bool {
@@ -2085,6 +2118,7 @@ mod tests {
             repo_root: "/repo/herdr".into(),
             checkout_path: format!("/repo/worktree-{ws_idx}").into(),
             is_linked_worktree: true,
+            parent_workspace_id: None,
         });
     }
 
@@ -2095,6 +2129,7 @@ mod tests {
             repo_root: "/repo/herdr".into(),
             checkout_path: "/repo/herdr".into(),
             is_linked_worktree: false,
+            parent_workspace_id: None,
         });
     }
 
@@ -2783,6 +2818,7 @@ mod tests {
             repo_root: "/repo/herdr".into(),
             checkout_path: "/repo/herdr".into(),
             is_linked_worktree: false,
+            parent_workspace_id: None,
         });
         state.workspaces[1].worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
             key: "repo-key".into(),
@@ -2790,6 +2826,7 @@ mod tests {
             repo_root: "/repo/herdr".into(),
             checkout_path: "/repo/herdr-issue".into(),
             is_linked_worktree: true,
+            parent_workspace_id: None,
         });
         state.selected = 0;
         state.active = Some(0);
@@ -2800,6 +2837,37 @@ mod tests {
         assert_eq!(state.workspaces[0].display_name(), "notes");
         assert_eq!(state.active, Some(0));
         assert_eq!(state.selected, 0);
+    }
+
+    #[test]
+    fn worktree_groups_follow_recorded_parent_among_sibling_parents() {
+        let mut state = app_with_workspaces(&["a", "b", "c", "c-child", "legacy-child"]);
+        let membership = |checkout: &str, linked: bool, parent: Option<String>| {
+            Some(crate::workspace::WorktreeSpaceMembership {
+                key: "repo-key".into(),
+                label: "herdr".into(),
+                repo_root: "/repo/herdr".into(),
+                checkout_path: checkout.into(),
+                is_linked_worktree: linked,
+                parent_workspace_id: parent,
+            })
+        };
+        let c_id = state.workspaces[2].id.clone();
+        for idx in 0..3 {
+            state.workspaces[idx].worktree_space = membership("/repo/herdr", false, None);
+        }
+        state.workspaces[3].worktree_space =
+            membership("/worktrees/c-child", true, Some(c_id.clone()));
+        state.workspaces[4].worktree_space = membership("/worktrees/legacy", true, None);
+
+        assert_eq!(state.worktree_parent_idx(3), Some(2));
+        assert_eq!(state.worktree_parent_idx(4), Some(0));
+        assert_eq!(state.worktree_group_key(3), Some(c_id.clone()));
+        assert_eq!(state.worktree_group_key(2), Some(c_id));
+        assert_ne!(state.worktree_group_key(0), state.worktree_group_key(2));
+        assert_eq!(state.workspace_close_indices(0), vec![0, 4]);
+        assert_eq!(state.workspace_close_indices(1), vec![1]);
+        assert_eq!(state.workspace_close_indices(2), vec![2, 3]);
     }
 
     #[test]
