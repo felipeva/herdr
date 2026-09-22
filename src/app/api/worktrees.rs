@@ -117,11 +117,15 @@ impl App {
                 Err(err) => return encode_error(id, "worktree_open_failed", err.to_string()),
             }
         };
+        let requested_parent_id = source
+            .workspace_idx
+            .map(|idx| self.public_workspace_id(idx));
         self.mark_worktree_membership(
             &source,
             ws_idx,
             entry.path.clone(),
             canonical_path != crate::worktree::canonical_or_original(&source.source_repo_root),
+            requested_parent_id,
             !created_workspace,
         );
         if let Some(label) = params.label {
@@ -324,14 +328,21 @@ impl App {
         target_ws_idx: usize,
         target_path: PathBuf,
         target_is_linked_worktree: bool,
+        requested_parent_id: Option<String>,
         emit_update: bool,
     ) {
         let parent_workspace_id = if target_is_linked_worktree {
             // Reopening a worktree from another parent must not steal it from a live parent.
-            self.state
-                .worktree_parent_idx(target_ws_idx)
-                .or(source.workspace_idx)
+            let has_recorded_parent = self.state.workspaces[target_ws_idx]
+                .worktree_space()
+                .is_some_and(|space| {
+                    space.is_linked_worktree && space.parent_workspace_id.is_some()
+                });
+            has_recorded_parent
+                .then(|| self.state.worktree_parent_idx(target_ws_idx))
+                .flatten()
                 .map(|idx| self.public_workspace_id(idx))
+                .or(requested_parent_id)
         } else {
             None
         };
@@ -889,10 +900,7 @@ mod tests {
             Some(c_id.as_str())
         );
         let c_child_idx = app.parse_workspace_id(&c_child.workspace_id).unwrap();
-        assert_eq!(
-            app.state.worktree_group_key(c_child_idx),
-            Some(c_id.clone())
-        );
+        assert_eq!(app.state.worktree_parent_idx(c_child_idx), Some(2));
 
         for (_, runtime) in app.terminal_runtimes.drain() {
             runtime.shutdown();
@@ -1165,12 +1173,130 @@ mod tests {
                 .map(|membership| membership.label.as_str()),
             Some("other")
         );
+        assert_eq!(app.state.worktree_parent_idx(2), Some(1));
 
         for (_, runtime) in app.terminal_runtimes.drain() {
             runtime.shutdown();
         }
         let _ = std::fs::remove_dir_all(checkout);
         let _ = std::fs::remove_dir_all(repo);
+    }
+
+    #[tokio::test]
+    async fn deferred_api_worktree_create_does_not_reassign_changed_source_to_sibling_parent() {
+        let mut app = test_app_with_event_hub(crate::api::EventHub::default());
+        let repo = create_committed_repo("api-worktree-create-sibling-parent-repo");
+        let checkout = unique_temp_path("api-worktree-create-sibling-parent-checkout");
+        std::fs::create_dir_all(&checkout).unwrap();
+        let checkout_key = crate::worktree::canonical_or_original(&checkout);
+        let membership = |key: &str| crate::workspace::WorktreeSpaceMembership {
+            key: key.into(),
+            label: "herdr".into(),
+            repo_root: repo.clone(),
+            checkout_path: repo.clone(),
+            is_linked_worktree: false,
+            parent_workspace_id: None,
+        };
+        let mut sibling = Workspace::test_new("a");
+        sibling.worktree_space = Some(membership("repo-key"));
+        let mut source = Workspace::test_new("c");
+        source.worktree_space = Some(membership("other-key"));
+        let source_id = source.id.clone();
+        app.state.workspaces = vec![sibling, source];
+        app.pending_api_worktree_creates
+            .insert(checkout_key.clone(), 9);
+        let (respond_to, response_rx) = response_channel();
+
+        app.handle_api_worktree_add_finished(WorktreeAddResult {
+            path: checkout.clone(),
+            api_request: Some(ApiWorktreeAddRequest {
+                id: "req".into(),
+                operation_id: 9,
+                checkout_key,
+                source_workspace_id: Some(source_id.clone()),
+                source_existing_membership: None,
+                source_checkout_path: repo.clone(),
+                source_repo_root: repo.clone(),
+                repo_key: "repo-key".into(),
+                repo_name: "herdr".into(),
+                label: None,
+                focus: false,
+                respond_to,
+            }),
+            result: Ok(()),
+        });
+
+        response_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("changed-source create completion should respond");
+        assert_eq!(app.state.workspaces.len(), 3);
+        assert_eq!(
+            app.state.workspaces[2]
+                .worktree_space()
+                .and_then(|membership| membership.parent_workspace_id.as_deref()),
+            Some(source_id.as_str())
+        );
+        assert_eq!(app.state.worktree_parent_idx(2), None);
+
+        for (_, runtime) in app.terminal_runtimes.drain() {
+            runtime.shutdown();
+        }
+        let _ = std::fs::remove_dir_all(checkout);
+        let _ = std::fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn reopening_worktree_keeps_only_a_live_recorded_parent() {
+        let mut app = test_app_with_event_hub(crate::api::EventHub::default());
+        app.state.workspaces = ["a", "c", "child"]
+            .into_iter()
+            .map(Workspace::test_new)
+            .collect();
+        let a_id = app.state.workspaces[0].id.clone();
+        let c_id = app.state.workspaces[1].id.clone();
+        let membership = |checkout: &str, linked: bool, parent: Option<String>| {
+            crate::workspace::WorktreeSpaceMembership {
+                key: "repo-key".into(),
+                label: "herdr".into(),
+                repo_root: "/repo/herdr".into(),
+                checkout_path: checkout.into(),
+                is_linked_worktree: linked,
+                parent_workspace_id: parent,
+            }
+        };
+        for idx in 0..2 {
+            app.state.workspaces[idx].worktree_space = Some(membership("/repo/herdr", false, None));
+        }
+        let source = WorktreeSource {
+            workspace_idx: Some(1),
+            source_checkout_path: "/repo/herdr".into(),
+            source_repo_root: "/repo/herdr".into(),
+            repo_key: "repo-key".into(),
+            repo_name: "herdr".into(),
+        };
+        let recorded_parent = |app: &App| {
+            app.state.workspaces[2]
+                .worktree_space()
+                .and_then(|membership| membership.parent_workspace_id.clone())
+        };
+
+        for (existing_parent, expected_parent) in [
+            (Some(a_id.clone()), a_id.clone()),
+            (None, c_id.clone()),
+            (Some("closed-parent".to_owned()), c_id.clone()),
+        ] {
+            app.state.workspaces[2].worktree_space =
+                Some(membership("/worktrees/child", true, existing_parent));
+            app.mark_worktree_membership(
+                &source,
+                2,
+                "/worktrees/child".into(),
+                true,
+                Some(c_id.clone()),
+                false,
+            );
+            assert_eq!(recorded_parent(&app), Some(expected_parent));
+        }
     }
 
     #[tokio::test]
@@ -1432,7 +1558,7 @@ mod tests {
         let source = app
             .resolve_worktree_source(Some(parent_id.clone()), None)
             .unwrap_or_else(|err| panic!("{}", err.message));
-        app.mark_worktree_membership(&source, 0, repo.clone(), false, false);
+        app.mark_worktree_membership(&source, 0, repo.clone(), false, None, false);
         let parent_membership = app.state.workspaces[0].worktree_space().cloned();
 
         // Shell navigation and refreshed Git metadata must not override provenance.
@@ -1449,7 +1575,14 @@ mod tests {
         let child_id = child.id.clone();
         app.state.workspaces.push(child);
         app.state.ensure_test_terminals();
-        app.mark_worktree_membership(&source, 1, checkout.clone(), true, false);
+        app.mark_worktree_membership(
+            &source,
+            1,
+            checkout.clone(),
+            true,
+            Some(parent_id.clone()),
+            false,
+        );
         let child_membership = app.state.workspaces[1].worktree_space().cloned();
 
         let response = run_deferred_api_request(

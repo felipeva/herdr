@@ -30,8 +30,9 @@ impl App {
         let mut workspaces = Vec::new();
         let mut tabs = Vec::new();
         let mut layouts = Vec::new();
+        let worktree_parents = self.state.worktree_parent_indices();
         for (ws_idx, ws) in self.state.workspaces.iter().enumerate() {
-            workspaces.push(self.workspace_info(ws_idx));
+            workspaces.push(self.workspace_info_with_parent(ws_idx, worktree_parents[ws_idx]));
             for tab_idx in 0..ws.tabs.len() {
                 if let Some(tab) = self.tab_info(ws_idx, tab_idx) {
                     tabs.push(tab);

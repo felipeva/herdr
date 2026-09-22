@@ -73,6 +73,18 @@ pub(super) fn snapshot_with_completions(
                     .and_then(|(tab_workspace_index, tab_index)| {
                         (tab_workspace_index == workspace_index).then_some(tab_index)
                     });
+            let worktree = workspace
+                .worktree
+                .map(|worktree| protocol::ClientShellWorktree {
+                    // Parents sharing a repo must not merge their worktree groups.
+                    key: if worktree.is_linked_worktree {
+                        worktree.parent_workspace_id.unwrap_or(worktree.repo_key)
+                    } else {
+                        workspace_id.clone()
+                    },
+                    label: worktree.repo_name,
+                    is_linked_worktree: worktree.is_linked_worktree,
+                });
             protocol::ClientShellWorkspace {
                 focused: focused_workspace_id.as_deref() == Some(workspace_id.as_str()),
                 workspace_id,
@@ -87,17 +99,7 @@ pub(super) fn snapshot_with_completions(
                 branch: state.branch(),
                 git_ahead_behind: state.git_ahead_behind(),
                 tokens,
-                worktree: workspace
-                    .worktree
-                    .map(|worktree| protocol::ClientShellWorktree {
-                        // Parents sharing a repo must not merge their worktree groups.
-                        key: app
-                            .state
-                            .worktree_group_key(workspace_index)
-                            .unwrap_or(worktree.repo_key),
-                        label: worktree.repo_name,
-                        is_linked_worktree: worktree.is_linked_worktree,
-                    }),
+                worktree,
                 agent_status: workspace.agent_status,
             }
         })

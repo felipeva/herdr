@@ -404,6 +404,7 @@ impl App {
         }
 
         let source_workspace_idx = self.api_create_source_workspace_idx(&api);
+        let requested_parent_id = api.source_workspace_id.clone();
         let mut source = WorktreeSource {
             workspace_idx: source_workspace_idx,
             source_checkout_path: api.source_checkout_path,
@@ -411,10 +412,16 @@ impl App {
             repo_key: api.repo_key,
             repo_name: api.repo_name,
         };
-        if let Err(err) = self.ensure_source_parent_membership(&mut source, true) {
-            Self::send_api_response(api.respond_to, encode_error(api.id, err.code, err.message));
-            return;
-        }
+        let created_parent = match self.ensure_source_parent_membership(&mut source, true) {
+            Ok(created) => created,
+            Err(err) => {
+                Self::send_api_response(
+                    api.respond_to,
+                    encode_error(api.id, err.code, err.message),
+                );
+                return;
+            }
+        };
 
         let (ws_idx, created_workspace) =
             if let Some(ws_idx) = self.open_workspace_idx_for_checkout(&result.path) {
@@ -439,11 +446,21 @@ impl App {
                 }
             };
 
+        // A source that closed or changed mid-create must not hand the worktree to a sibling parent.
+        let fallback_parent_id = source
+            .workspace_idx
+            .map(|idx| self.public_workspace_id(idx));
+        let requested_parent_id = if created_parent {
+            fallback_parent_id
+        } else {
+            requested_parent_id.or(fallback_parent_id)
+        };
         self.mark_worktree_membership(
             &source,
             ws_idx,
             result.path.clone(),
             true,
+            requested_parent_id,
             !created_workspace,
         );
         if let Some(label) = api.label {
